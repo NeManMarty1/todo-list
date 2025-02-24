@@ -15,7 +15,7 @@ import (
 	"github.com/NeManMarty1/todo-list/internal/middleware"
 	"github.com/NeManMarty1/todo-list/internal/repository"
 	"github.com/NeManMarty1/todo-list/internal/service"
-	
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -24,12 +24,12 @@ func main() {
 
 	cfg, err := config.LoadConfig("config.yaml")
 	if err != nil {
-		logger.Log.Fatalf("Ошибка загрузки конфигурации: %v", err)
+		logger.Log.WithError(err).Fatal("failed to load config")
 	}
 
 	database, err := db.InitDB(cfg.GetDSN())
 	if err != nil {
-		logger.Log.Fatalf("Ошибка подключения к БД: %v", err)
+		logger.Log.WithError(err).Fatal("failed to connect to database")
 	}
 	defer database.Close()
 
@@ -55,26 +55,28 @@ func main() {
 		Handler: r,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	go func() {
-		logger.Log.Infof("Запуск сервера на %s", cfg.Server.Port)
+		logger.Log.WithField("port", cfg.Server.Port).Info("starting server")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Log.Fatalf("Ошибка сервера: %v", err)
+			logger.Log.WithError(err).Fatal("server failed to start")
 		}
 	}()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	logger.Log.Info("Получен сигнал завершения")
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer shutdownCancel()
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	logger.Log.Info("shutting down server...")
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Log.Fatalf("Ошибка при завершении: %v", err)
+		logger.Log.WithError(err).Error("server shutdown failed")
+		return
 	}
-	logger.Log.Info("Сервер успешно завершил работу")
+
+	logger.Log.Info("server gracefully stopped")
 }
